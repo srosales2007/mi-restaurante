@@ -97,6 +97,7 @@ export default function App() {
   const [showCart,       setShowCart]       = useState(false)
   const [activeCategory, setActiveCategory] = useState("all")
   const [search,         setSearch]         = useState("")
+  const [deliveryType,   setDeliveryType]   = useState("pickup") // "pickup" | "delivery"
   const [customer,       setCustomer]       = useState({ name: "", phone: "", address: "", notes: "" })
   const [orderErrors,    setOrderErrors]    = useState({})
 
@@ -109,23 +110,35 @@ export default function App() {
     .map(([id, qty]) => ({ ...products.find((p) => p.id === Number(id)), qty }))
     .filter((i) => i.qty > 0 && i.name)
 
-  const cartCount = cartItems.reduce((s, i) => s + i.qty, 0)
-  const subtotal  = cartItems.reduce((s, i) => s + i.price * i.qty, 0)
-  const total     = subtotal + (subtotal > 0 ? settings.deliveryFee : 0)
+  const cartCount  = cartItems.reduce((s, i) => s + i.qty, 0)
+  const subtotal   = cartItems.reduce((s, i) => s + i.price * i.qty, 0)
+  const isDelivery = deliveryType === "delivery"
+  const total      = subtotal + (isDelivery && subtotal > 0 ? settings.deliveryFee : 0)
 
   // ── WhatsApp order ───────────────────────────────────────────
   const sendOrder = () => {
     const e = {}
-    if (!customer.name.trim())    e.name    = "Requerido"
-    if (!customer.phone.trim())   e.phone   = "Requerido"
-    if (!customer.address.trim()) e.address = "Requerido"
-    if (subtotal < settings.minOrder) e.min = `El pedido mínimo es ${fmt(settings.minOrder)}`
+    if (!customer.name.trim())                          e.name    = "Requerido"
+    if (!customer.phone.trim())                         e.phone   = "Requerido"
+    if (isDelivery && !customer.address.trim())         e.address = "Requerido"
+    if (isDelivery && subtotal < settings.minOrder)     e.min     = `El pedido mínimo para envío es ${fmt(settings.minOrder)}`
     setOrderErrors(e)
     if (Object.keys(e).length > 0) return
 
     const lines = cartItems.map((i) => `• ${i.qty}x ${i.name} — ${fmt(i.price * i.qty)}`).join("\n")
-    const msg = `🛒 *NUEVO PEDIDO — ${settings.storeName}*\n\n👤 *Cliente:* ${customer.name}\n📞 *Teléfono:* ${customer.phone}\n📍 *Dirección:* ${customer.address}${customer.notes ? `\n📝 *Notas:* ${customer.notes}` : ""}\n\n*Productos:*\n${lines}\n\n────────────────\nSubtotal: ${fmt(subtotal)}\nEnvío: ${fmt(settings.deliveryFee)}\n*TOTAL: ${fmt(total)}*`
+    const deliveryLine = isDelivery
+      ? `📍 *Dirección:* ${customer.address}\n`
+      : `🏪 *Entrega:* Retiro en tienda\n`
+    const totalsLine = isDelivery
+      ? `Subtotal: ${fmt(subtotal)}\nEnvío: ${fmt(settings.deliveryFee)}\n*TOTAL: ${fmt(total)}*`
+      : `*TOTAL: ${fmt(subtotal)}*`
+    const msg = `🛒 *NUEVO PEDIDO — ${settings.storeName}*\n\n👤 *Cliente:* ${customer.name}\n📞 *Teléfono:* ${customer.phone}\n${deliveryLine}${customer.notes ? `📝 *Notas:* ${customer.notes}\n` : ""}\n*Productos:*\n${lines}\n\n────────────────\n${totalsLine}`
     window.open(`https://wa.me/${settings.whatsapp}?text=${encodeURIComponent(msg)}`, "_blank")
+
+    setCart({})
+    setCustomer({ name: "", phone: "", address: "", notes: "" })
+    setOrderErrors({})
+    setShowCart(false)
   }
 
   // ── Admin actions ────────────────────────────────────────────
@@ -361,18 +374,48 @@ export default function App() {
                         ))}
                       </div>
 
+                      {/* Delivery type selector */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 mb-3">Tipo de entrega</h3>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: "pickup",   label: "🏪 Recoger en tienda", sub: "Sin mínimo · Gratis" },
+                            { id: "delivery", label: "🛵 A domicilio",        sub: `Mínimo ${fmt(settings.minOrder)} · +${fmt(settings.deliveryFee)}` },
+                          ].map((opt) => (
+                            <button
+                              key={opt.id}
+                              onClick={() => { setDeliveryType(opt.id); setOrderErrors({}) }}
+                              className={`p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                                deliveryType === opt.id
+                                  ? "border-gray-900 bg-gray-900 text-white"
+                                  : "border-gray-100 bg-gray-50 text-gray-700 hover:border-gray-200"
+                              }`}
+                            >
+                              <p className="text-sm font-medium leading-snug">{opt.label}</p>
+                              <p className={`text-xs mt-0.5 ${deliveryType === opt.id ? "text-gray-400" : "text-gray-400"}`}>{opt.sub}</p>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Totals */}
                       <div className="bg-gray-50 rounded-2xl p-4 space-y-2">
                         <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
-                        <div className="flex justify-between text-sm text-gray-500"><span>Envío</span><span>{fmt(settings.deliveryFee)}</span></div>
+                        {isDelivery && (
+                          <div className="flex justify-between text-sm text-gray-500"><span>Envío</span><span>{fmt(settings.deliveryFee)}</span></div>
+                        )}
                         <div className="flex justify-between text-base font-semibold text-gray-900 pt-2 border-t border-gray-200"><span>Total</span><span>{fmt(total)}</span></div>
                       </div>
 
+                      {/* Customer form */}
                       <div className="space-y-3">
-                        <h3 className="text-sm font-semibold text-gray-900">Datos de entrega</h3>
-                        <Field icon={User}   placeholder="Nombre completo"       value={customer.name}    onChange={(v) => setCustomer({ ...customer, name: v })}    error={orderErrors.name} />
-                        <Field icon={Phone}  placeholder="Teléfono"               value={customer.phone}   onChange={(v) => setCustomer({ ...customer, phone: v })}   error={orderErrors.phone} />
-                        <Field icon={MapPin} placeholder="Dirección de entrega"   value={customer.address} onChange={(v) => setCustomer({ ...customer, address: v })} error={orderErrors.address} multiline />
-                        <Field               placeholder="Notas opcionales..."    value={customer.notes}   onChange={(v) => setCustomer({ ...customer, notes: v })}   multiline />
+                        <h3 className="text-sm font-semibold text-gray-900">Tus datos</h3>
+                        <Field icon={User}   placeholder="Nombre completo"     value={customer.name}    onChange={(v) => setCustomer({ ...customer, name: v })}    error={orderErrors.name} />
+                        <Field icon={Phone}  placeholder="Teléfono"             value={customer.phone}   onChange={(v) => setCustomer({ ...customer, phone: v })}   error={orderErrors.phone} />
+                        {isDelivery && (
+                          <Field icon={MapPin} placeholder="Dirección de entrega" value={customer.address} onChange={(v) => setCustomer({ ...customer, address: v })} error={orderErrors.address} multiline />
+                        )}
+                        <Field placeholder="Notas opcionales..." value={customer.notes} onChange={(v) => setCustomer({ ...customer, notes: v })} multiline />
                       </div>
 
                       {orderErrors.min && (
